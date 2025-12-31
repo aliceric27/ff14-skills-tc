@@ -448,21 +448,32 @@ const DB = {
 let sortField = 'id';
 let sortAsc = true;
 
+// ===== CSV 來源設定 =====
+// 使用 jsDelivr CDN 來取得最新的 FFXIV 繁中資料
+// 資料來源: https://github.com/miaki3457/ffxiv-datamining-tc
+const CSV_BASE_URL = 'https://cdn.jsdelivr.net/gh/miaki3457/ffxiv-datamining-tc@latest/csv';
+
+const CSV_FILES = [
+    { name: 'Action.csv', type: 'action' },
+    { name: 'Status.csv', type: 'status' },
+    { name: 'ClassJob.csv', type: 'job' }
+];
+
 // ===== CSV 自動載入 =====
 async function autoLoadCSV() {
-    log('嘗試自動載入 CSV 檔案...', 'info');
-
-    const csvFiles = [
-        { name: 'Action.csv', type: 'action' },
-        { name: 'Status.csv', type: 'status' },
-        { name: 'ClassJob.csv', type: 'job' }
-    ];
+    log('從 GitHub 載入最新資料...', 'info');
+    log('資料來源: miaki3457/ffxiv-datamining-tc', 'info');
 
     let loadedCount = 0;
+    let failedCount = 0;
 
-    for (const file of csvFiles) {
+    for (const file of CSV_FILES) {
         try {
-            const response = await fetch(file.name);
+            // 優先從 jsDelivr CDN 載入（支援 CORS）
+            const url = `${CSV_BASE_URL}/${file.name}`;
+            log(`載入 ${file.name}...`, 'info');
+
+            const response = await fetch(url);
             if (response.ok) {
                 const text = await response.text();
                 Papa.parse(text, {
@@ -471,16 +482,29 @@ async function autoLoadCSV() {
                     complete: (result) => {
                         processFile(file.name, file.type, result.data);
                         loadedCount++;
-                        if (loadedCount === csvFiles.length) {
-                            onAllFilesLoaded();
-                        }
+                        checkAllLoaded(loadedCount, failedCount);
                     }
                 });
             } else {
-                log(`${file.name} 未找到，請手動上傳`, 'warn');
+                log(`❌ ${file.name} 載入失敗 (HTTP ${response.status})`, 'error');
+                failedCount++;
+                checkAllLoaded(loadedCount, failedCount);
             }
         } catch (e) {
-            log(`無法自動載入 ${file.name}`, 'warn');
+            log(`❌ ${file.name} 載入錯誤: ${e.message}`, 'error');
+            failedCount++;
+            checkAllLoaded(loadedCount, failedCount);
+        }
+    }
+}
+
+function checkAllLoaded(loaded, failed) {
+    const total = CSV_FILES.length;
+    if (loaded + failed === total) {
+        if (loaded === total) {
+            onAllFilesLoaded();
+        } else {
+            log(`⚠️ 部分檔案載入失敗，請手動上傳`, 'warn');
         }
     }
 }
