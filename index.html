@@ -449,9 +449,13 @@ let sortField = 'id';
 let sortAsc = true;
 
 // ===== CSV 來源設定 =====
-// 使用 jsDelivr CDN 來取得最新的 FFXIV 繁中資料
 // 資料來源: https://github.com/miaki3457/ffxiv-datamining-tc
-const CSV_BASE_URL = 'https://cdn.jsdelivr.net/gh/miaki3457/ffxiv-datamining-tc@latest/csv';
+const CSV_SOURCES = [
+    // 優先使用 jsDelivr（單檔案請求，繞過 50MB 限制）
+    (file) => `https://cdn.jsdelivr.net/gh/miaki3457/ffxiv-datamining-tc@master/csv/${file}`,
+    // 備用：GitHub raw（需要 HTTP 伺服器）
+    (file) => `https://raw.githubusercontent.com/miaki3457/ffxiv-datamining-tc/master/csv/${file}`
+];
 
 const CSV_FILES = [
     { name: 'Action.csv', type: 'action' },
@@ -468,34 +472,40 @@ async function autoLoadCSV() {
     let failedCount = 0;
 
     for (const file of CSV_FILES) {
-        try {
-            // 優先從 jsDelivr CDN 載入（支援 CORS）
-            const url = `${CSV_BASE_URL}/${file.name}`;
-            log(`載入 ${file.name}...`, 'info');
+        let loaded = false;
 
-            const response = await fetch(url);
-            if (response.ok) {
-                const text = await response.text();
-                Papa.parse(text, {
-                    header: false,
-                    skipEmptyLines: true,
-                    complete: (result) => {
-                        processFile(file.name, file.type, result.data);
-                        loadedCount++;
-                        checkAllLoaded(loadedCount, failedCount);
-                    }
-                });
-            } else {
-                log(`❌ ${file.name} 載入失敗 (HTTP ${response.status})`, 'error');
-                failedCount++;
-                checkAllLoaded(loadedCount, failedCount);
+        for (const getUrl of CSV_SOURCES) {
+            if (loaded) break;
+
+            try {
+                const url = getUrl(file.name);
+                log(`載入 ${file.name}...`, 'info');
+
+                const response = await fetch(url);
+                if (response.ok) {
+                    const text = await response.text();
+                    Papa.parse(text, {
+                        header: false,
+                        skipEmptyLines: true,
+                        complete: (result) => {
+                            processFile(file.name, file.type, result.data);
+                        }
+                    });
+                    loaded = true;
+                    loadedCount++;
+                }
+            } catch (e) {
+                // 嘗試下一個來源
             }
-        } catch (e) {
-            log(`❌ ${file.name} 載入錯誤: ${e.message}`, 'error');
+        }
+
+        if (!loaded) {
+            log(`❌ ${file.name} 載入失敗`, 'error');
             failedCount++;
-            checkAllLoaded(loadedCount, failedCount);
         }
     }
+
+    checkAllLoaded(loadedCount, failedCount);
 }
 
 function checkAllLoaded(loaded, failed) {
